@@ -18,6 +18,8 @@ from app.core.memory import (
 from app.core.llm import LLMClient
 from app.core.commands import handle_command
 
+from app.core.stats import format_stats
+
 load_dotenv()
 console = Console()
 
@@ -94,21 +96,23 @@ def main():
                 log_event(cfg.log_dir, "Chat reset")
                 continue
             if user_text == "/stats":
-                console.print(f"model={cfg.model} history_keep={cfg.history_keep} summarize_every={cfg.summarize_every}")
+                console.print(format_stats(cfg))
                 continue
 
         messages = build_messages(cfg, user_text)
 
         t0 = datetime.now()
         try:
-            assistant_text = llm.chat(messages)
+            result = llm.chat(messages)
+            assistant_text = result["text"]
+            latency = result["latency"]
+            tps = result["tps"]
         except Exception as e:
             log_event(cfg.log_dir, f"LLM error: {e}")
             console.print(f"[red]LLM 呼叫失敗[/red]: {e}\n")
             continue
 
-        dt = (datetime.now() - t0).total_seconds()
-        console.print(f"[green]Nayuki[/green] ({dt:.2f}s)\n{assistant_text}\n")
+        console.print(f"[green]Nayuki[/green] ({latency:.2f}s | ~{tps:.1f} tok/s)\n{assistant_text}\n")
 
         ts = now_iso()
         append_jsonl(cfg.chat_log, {"role": "user", "content": user_text, "ts": ts})
