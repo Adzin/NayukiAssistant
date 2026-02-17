@@ -1,5 +1,4 @@
 @echo off
 cd /d %~dp0
-call .\.venv\Scripts\activate
-python -m app.main
+.\.venv\Scripts\python.exe -m app.main
 pause

@@ -21,7 +21,7 @@ from app.core.commands import handle_command
 from app.core.stats import format_stats
 
 from app.audio.tts_sapi import SapiTTS
-from app.audio.stt_stub import StubSTT
+from app.audio.stt_whisper import WhisperSTT
 
 load_dotenv()
 console = Console()
@@ -74,7 +74,7 @@ def main():
     cfg.mem_dir.mkdir(exist_ok=True)
     cfg.log_dir.mkdir(exist_ok=True)
     tts = SapiTTS()
-    stt = StubSTT()
+    stt = WhisperSTT("base")
     speak_enabled = False
 
     llm = LLMClient(cfg.model, timeout=60.0, retries=1)
@@ -105,15 +105,48 @@ def main():
                 console.print(format_stats(cfg))
                 continue
             if user_text == "/ptt":
-                # 1) 取得語音辨識結果（目前是 stub）
-                spoken_text = stt.listen_once()
+                try:
+                    spoken_text = stt.listen_once()
+                except Exception as e:
+                    console.print(f"[red]STT 失敗[/red]: {e}")
+                    log_event(cfg.log_dir, f"STT error: {e}")
+                    continue
+                
                 if not spoken_text:
                     console.print("(空輸入，已取消)")
                     continue
-                # 2) 用辨識文字當作 user_text 進同一套流程
-                user_text = spoken_text
-                console.print(f"[cyan]Nick(STT)[/cyan] {user_text}")
-                # 注意：不要 continue，讓它落到下面 messages = build_messages(...) 的流程
+                
+                # 顯示辨識結果
+                console.print(f"[cyan]Nick(STT)[/cyan] {spoken_text}")
+            
+                # 直接走一次完整 LLM 流程（不要回到下面再跑一次）
+                messages = build_messages(cfg, spoken_text)
+            
+                try:
+                    result = llm.chat(messages)
+                    assistant_text = result["text"]
+                    latency = result["latency"]
+                    tps = result["tps"]
+                except Exception as e:
+                    log_event(cfg.log_dir, f"LLM error: {e}")
+                    console.print(f"[red]LLM 呼叫失敗[/red]: {e}\n")
+                    continue
+                
+                console.print(f"[green]Nayuki[/green] ({latency:.2f}s | ~{tps:.1f} tok/s)\n{assistant_text}\n")
+            
+                ts = now_iso()
+                append_jsonl(cfg.chat_log, {"role": "user", "content": spoken_text, "ts": ts})
+                append_jsonl(cfg.chat_log, {"role": "assistant", "content": assistant_text, "ts": ts})
+            
+                try:
+                    maybe_summarize(cfg, llm)
+                except Exception as e:
+                    log_event(cfg.log_dir, f"Summarize error: {e}")
+            
+                if speak_enabled:
+                    tts.speak(assistant_text)
+            
+                continue
             if user_text.startswith("/speak"):
                 parts = user_text.split()
                 if len(parts) == 2 and parts[1].lower() in ("on", "off"):
