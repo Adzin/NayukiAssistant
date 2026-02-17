@@ -19,6 +19,7 @@ from app.core.llm import LLMClient
 from app.core.commands import handle_command
 
 from app.core.stats import format_stats
+from app.audio.tts_sapi import SapiTTS
 
 load_dotenv()
 console = Console()
@@ -70,8 +71,10 @@ def main():
     cfg = load_config(Path(__file__).resolve().parents[1])
     cfg.mem_dir.mkdir(exist_ok=True)
     cfg.log_dir.mkdir(exist_ok=True)
+    tts = SapiTTS()
+    speak_enabled = False
 
-    llm = LLMClient(cfg.model)
+    llm = LLMClient(cfg.model, timeout=60.0, retries=1)
 
     console.print(f"[bold]NayukiAssistant[/bold] model={cfg.model}")
     console.print("指令：/exit 離開、/mem 查看長期記憶、/reset 清空對話、/stats 狀態\n")
@@ -98,6 +101,15 @@ def main():
             if user_text == "/stats":
                 console.print(format_stats(cfg))
                 continue
+        if user_text.startswith("/speak"):
+            parts = user_text.split()
+            if len(parts) == 2 and parts[1].lower() in ("on", "off"):
+                speak_enabled = (parts[1].lower() == "on")
+                console.print(f"speak_enabled={speak_enabled}")
+                log_event(cfg.log_dir, f"speak_enabled={speak_enabled}")
+            else:
+                console.print("用法：/speak on 或 /speak off")
+            continue
 
         messages = build_messages(cfg, user_text)
 
@@ -113,7 +125,9 @@ def main():
             continue
 
         console.print(f"[green]Nayuki[/green] ({latency:.2f}s | ~{tps:.1f} tok/s)\n{assistant_text}\n")
-
+        if speak_enabled:
+            tts.speak(assistant_text)
+            
         ts = now_iso()
         append_jsonl(cfg.chat_log, {"role": "user", "content": user_text, "ts": ts})
         append_jsonl(cfg.chat_log, {"role": "assistant", "content": assistant_text, "ts": ts})
