@@ -19,7 +19,9 @@ from app.core.llm import LLMClient
 from app.core.commands import handle_command
 
 from app.core.stats import format_stats
+
 from app.audio.tts_sapi import SapiTTS
+from app.audio.stt_stub import StubSTT
 
 load_dotenv()
 console = Console()
@@ -72,6 +74,7 @@ def main():
     cfg.mem_dir.mkdir(exist_ok=True)
     cfg.log_dir.mkdir(exist_ok=True)
     tts = SapiTTS()
+    stt = StubSTT()
     speak_enabled = False
 
     llm = LLMClient(cfg.model, timeout=60.0, retries=1)
@@ -101,15 +104,25 @@ def main():
             if user_text == "/stats":
                 console.print(format_stats(cfg))
                 continue
-        if user_text.startswith("/speak"):
-            parts = user_text.split()
-            if len(parts) == 2 and parts[1].lower() in ("on", "off"):
-                speak_enabled = (parts[1].lower() == "on")
-                console.print(f"speak_enabled={speak_enabled}")
-                log_event(cfg.log_dir, f"speak_enabled={speak_enabled}")
-            else:
-                console.print("用法：/speak on 或 /speak off")
-            continue
+            if user_text == "/ptt":
+                # 1) 取得語音辨識結果（目前是 stub）
+                spoken_text = stt.listen_once()
+                if not spoken_text:
+                    console.print("(空輸入，已取消)")
+                    continue
+                # 2) 用辨識文字當作 user_text 進同一套流程
+                user_text = spoken_text
+                console.print(f"[cyan]Nick(STT)[/cyan] {user_text}")
+                # 注意：不要 continue，讓它落到下面 messages = build_messages(...) 的流程
+            if user_text.startswith("/speak"):
+                parts = user_text.split()
+                if len(parts) == 2 and parts[1].lower() in ("on", "off"):
+                    speak_enabled = (parts[1].lower() == "on")
+                    console.print(f"speak_enabled={speak_enabled}")
+                    log_event(cfg.log_dir, f"speak_enabled={speak_enabled}")
+                else:
+                    console.print("用法：/speak on 或 /speak off")
+                continue
 
         messages = build_messages(cfg, user_text)
 
@@ -127,7 +140,7 @@ def main():
         console.print(f"[green]Nayuki[/green] ({latency:.2f}s | ~{tps:.1f} tok/s)\n{assistant_text}\n")
         if speak_enabled:
             tts.speak(assistant_text)
-            
+
         ts = now_iso()
         append_jsonl(cfg.chat_log, {"role": "user", "content": user_text, "ts": ts})
         append_jsonl(cfg.chat_log, {"role": "assistant", "content": assistant_text, "ts": ts})

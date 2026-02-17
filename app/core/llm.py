@@ -1,22 +1,34 @@
-from typing import List, Dict, Optional
+from typing import List, Dict
 import ollama
+import time
 
 class LLMClient:
-    def __init__(self, model: str):
+    def __init__(self, model: str, timeout: float = 60.0, retries: int = 1):
         self.model = model
+        self.timeout = timeout
+        self.retries = retries
 
-    def chat(self, messages: List[Dict], timeout_s: Optional[float] = None) -> str:
-        # ollama python client目前不一定支援 timeout 參數，
-        # timeout 我們先留介面，之後改用 requests 直打 localhost API 時再實作。
-        resp = ollama.chat(model=self.model, messages=messages)
-        return resp["message"]["content"]
+    def chat(self, messages: List[Dict]) -> Dict:
+        attempt = 0
 
-    def summarize(self, text: str) -> str:
-        resp = ollama.chat(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": "你是負責整理長期記憶的助手，務必精簡、可用。"},
-                {"role": "user", "content": text},
-            ],
-        )
-        return resp["message"]["content"].strip()
+        while True:
+            try:
+                t0 = time.time()
+                resp = ollama.chat(model=self.model, messages=messages)
+                dt = time.time() - t0
+
+                text = resp["message"]["content"]
+                approx_tokens = max(len(text) // 4, 1)
+
+                return {
+                    "text": text,
+                    "latency": dt,
+                    "approx_tokens": approx_tokens,
+                    "tps": approx_tokens / dt if dt > 0 else 0.0,
+                }
+
+            except Exception as e:
+                attempt += 1
+                if attempt > self.retries:
+                    raise RuntimeError(f"LLM failed after {self.retries} retries: {e}")
+                time.sleep(1)

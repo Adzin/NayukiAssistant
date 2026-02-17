@@ -2,6 +2,21 @@ from __future__ import annotations
 from dataclasses import asdict
 from pathlib import Path
 import os
+import subprocess
+
+def get_ollama_models() -> str:
+    try:
+        result = subprocess.run(
+            ["ollama", "list"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode != 0:
+            return "ollama list failed"
+        return result.stdout.strip()
+    except Exception as e:
+        return f"ollama list error: {e}"
 
 def file_line_count(p: Path) -> int:
     if not p.exists():
@@ -37,5 +52,8 @@ def format_stats(cfg) -> str:
     parts.append(f"chat_log={cfg.chat_log} (lines={chat_lines})")
     parts.append(f"long_memory={cfg.long_memory} (exists={long_mem_exists}, size={long_mem_mb:.2f}MB)")
     parts.append(f"ollama_models_env={ollama_models}")
+
+    parts.append("\nInstalled models:")
+    parts.append(get_ollama_models())
 
     return "\n".join(parts)

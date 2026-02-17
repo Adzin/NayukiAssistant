@@ -11,5 +11,7 @@ def handle_command(cmd: str) -> CommandResult:
         return CommandResult(True)
     if cmd.startswith("/speak"):
         return CommandResult(True)
+    if cmd == "/ptt":
+        return CommandResult(True)
     return CommandResult(False)
     
